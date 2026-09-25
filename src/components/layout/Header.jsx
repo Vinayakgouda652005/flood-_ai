@@ -8,6 +8,7 @@ export const Header = ({
   onToggleMobileSidebar,
   onRefresh,
   isRefreshing = false,
+  selectedLocation = null,
 }) => {
   const selectedBasin = basins.find((b) => b.id === selectedBasinId) || basins[0];
 
@@ -43,8 +44,8 @@ export const Header = ({
         {/* Right: Basin Selector & Operational Status */}
         <div className="flex items-center gap-2 sm:gap-3 flex-wrap">
           {/* Location Selector */}
-          <div className="flex items-center gap-1.5 bg-slate-50 border border-slate-300 rounded px-2.5 py-1 text-xs text-slate-700">
-            <MapPin className="w-3.5 h-3.5 text-slate-500 shrink-0" />
+          <div className="flex items-center gap-1.5 bg-slate-50 border border-slate-300 rounded px-2.5 py-1 text-xs text-slate-700 max-w-xs truncate">
+            <MapPin className="w-3.5 h-3.5 text-sky-700 shrink-0" />
             <label htmlFor="basin-select" className="text-slate-500 font-medium shrink-0">
               Location:
             </label>
@@ -52,7 +53,7 @@ export const Header = ({
               id="basin-select"
               value={selectedBasinId}
               onChange={(e) => onSelectBasin(e.target.value)}
-              className="bg-transparent font-medium text-slate-800 focus:outline-hidden cursor-pointer"
+              className="bg-transparent font-medium text-slate-800 focus:outline-hidden cursor-pointer truncate"
             >
               {basins.map((basin) => (
                 <option key={basin.id} value={basin.id}>

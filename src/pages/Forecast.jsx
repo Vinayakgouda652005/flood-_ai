@@ -1,9 +1,10 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { ForecastChart } from '../components/charts/ForecastChart.jsx';
 import { RainfallChart } from '../components/charts/RainfallChart.jsx';
 import { FloodAreaChart } from '../components/charts/FloodAreaChart.jsx';
 import { RiskBadge } from '../components/common/RiskBadge.jsx';
 import { StatCard } from '../components/common/StatCard.jsx';
+import { floodService } from '../services/floodService.js';
 import {
   Clock,
   Waves,
@@ -11,15 +12,67 @@ import {
   Maximize2,
   Calendar,
   AlertCircle,
+  MapPin,
+  HelpCircle,
 } from 'lucide-react';
+
+const formatHumanDate = (dateStr) => {
+  if (!dateStr) return '';
+  try {
+    const [year, month, day] = dateStr.split('-').map(Number);
+    if (!year || !month || !day) return dateStr;
+    const dateObj = new Date(year, month - 1, day);
+    return dateObj.toLocaleDateString('en-GB', {
+      day: 'numeric',
+      month: 'long',
+      year: 'numeric',
+    });
+  } catch {
+    return dateStr;
+  }
+};
 
 export const Forecast = ({
   timelineData = [],
   summary,
+  selectedLocation,
+  selectedDate,
 }) => {
   const [selectedPointIndex, setSelectedPointIndex] = useState(2); // default to +6 hr
+  const [activeTimeline, setActiveTimeline] = useState(timelineData);
 
-  const activePoint = timelineData[selectedPointIndex] || timelineData[0];
+  // Attempt backend GET /api/forecast if endpoint exists
+  useEffect(() => {
+    let isMounted = true;
+    async function fetchBackendForecast() {
+      if (selectedLocation?.latitude && selectedLocation?.longitude && selectedDate) {
+        try {
+          const backendData = await floodService.getForecast({
+            latitude: selectedLocation.latitude,
+            longitude: selectedLocation.longitude,
+            date: selectedDate,
+          });
+          if (isMounted && backendData && Array.isArray(backendData.timeSteps)) {
+            setActiveTimeline(backendData.timeSteps);
+          }
+        } catch {
+          // Keep baseline data
+        }
+      }
+    }
+    fetchBackendForecast();
+    return () => {
+      isMounted = false;
+    };
+  }, [selectedLocation, selectedDate]);
+
+  useEffect(() => {
+    if (timelineData && timelineData.length > 0) {
+      setActiveTimeline(timelineData);
+    }
+  }, [timelineData]);
+
+  const activePoint = activeTimeline[selectedPointIndex] || activeTimeline[0] || {};
 
   return (
     <div className="space-y-5">
@@ -37,10 +90,35 @@ export const Forecast = ({
           </p>
         </div>
 
-        <div className="flex items-center gap-2 text-xs font-mono text-slate-500 bg-slate-50 border border-slate-200 rounded px-2.5 py-1.5">
-          <Calendar className="w-3.5 h-3.5 text-slate-400" />
-          <span>Forecast Horizon: +1h to +24h</span>
+        {/* Selected Location & Date Context Chips */}
+        <div className="flex items-center gap-2 flex-wrap">
+          <div className="flex items-center gap-1.5 text-xs text-slate-700 bg-sky-50 border border-sky-200 rounded px-2.5 py-1.5 font-medium">
+            <MapPin className="w-3.5 h-3.5 text-sky-700" />
+            <span>
+              {selectedLocation?.name || summary?.locationName || 'Monitored Reach'}
+            </span>
+          </div>
+
+          <div className="flex items-center gap-1.5 text-xs font-mono text-slate-600 bg-slate-50 border border-slate-200 rounded px-2.5 py-1.5">
+            <Calendar className="w-3.5 h-3.5 text-slate-500" />
+            <span>
+              {selectedDate ? formatHumanDate(selectedDate) : 'Today'}
+            </span>
+          </div>
         </div>
+      </div>
+
+      {/* Backend API Integration Banner */}
+      <div className="p-3 bg-slate-50 border border-slate-200 rounded text-xs text-slate-700 flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+        <div className="flex items-center gap-2">
+          <HelpCircle className="w-4 h-4 text-sky-700 shrink-0" />
+          <span>
+            <strong>Forecast API Contract:</strong> Structured to receive dynamic hydrographs from <code className="font-mono bg-white px-1 py-0.5 rounded border border-slate-300">GET /api/forecast?latitude={selectedLocation?.latitude || '16.51'}&amp;longitude={selectedLocation?.longitude || '80.62'}&amp;date={selectedDate || '2026-09-25'}</code>.
+          </span>
+        </div>
+        <span className="text-[10px] font-mono uppercase bg-sky-100 text-sky-800 px-2 py-0.5 rounded shrink-0 font-bold">
+          Backend Ready
+        </span>
       </div>
 
       {/* Horizon Slider / Interactive Step Selector */}
@@ -54,12 +132,12 @@ export const Forecast = ({
           </span>
         </div>
 
-        <div className="grid grid-cols-5 gap-2">
-          {timelineData.map((pt, idx) => {
+        <div className="grid grid-cols-2 sm:grid-cols-5 gap-2">
+          {activeTimeline.map((pt, idx) => {
             const isSelected = selectedPointIndex === idx;
             return (
               <button
-                key={pt.hours}
+                key={pt.hours || idx}
                 onClick={() => setSelectedPointIndex(idx)}
                 className={`p-2.5 rounded border text-left transition-all cursor-pointer ${
                   isSelected
@@ -127,12 +205,12 @@ export const Forecast = ({
 
       {/* Charts Stack */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
-        <ForecastChart data={timelineData} title="River Gauge Level Projection vs Time" />
-        <FloodAreaChart data={timelineData} title="Predicted Inundation Extent Expansion (km²)" />
+        <ForecastChart data={activeTimeline} title="River Gauge Level Projection vs Time" />
+        <FloodAreaChart data={activeTimeline} title="Predicted Inundation Extent Expansion (km²)" />
       </div>
 
       <div>
-        <RainfallChart data={timelineData} title="Forecasted Cumulative Catchment Rainfall (mm)" />
+        <RainfallChart data={activeTimeline} title="Forecasted Cumulative Catchment Rainfall (mm)" />
       </div>
 
       {/* Hydrograph Details Table */}
@@ -156,9 +234,9 @@ export const Forecast = ({
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
-              {timelineData.map((row) => (
+              {activeTimeline.map((row, idx) => (
                 <tr
-                  key={row.hours}
+                  key={row.hours || idx}
                   className={`hover:bg-slate-50 ${
                     activePoint?.hours === row.hours ? 'bg-sky-50/50 font-medium' : ''
                   }`}

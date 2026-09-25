@@ -11,6 +11,8 @@ export const Dashboard = ({
   onNavigate,
   summary,
   timelineData,
+  selectedLocation,
+  predictionResult,
 }) => {
   const [layers, setLayers] = useState({
     showRiver: true,
@@ -135,7 +137,14 @@ export const Dashboard = ({
         </div>
 
         <div className="relative" style={{ height: '420px' }}>
-          <FloodMap horizonHours={24} layers={layers} height="420px" />
+          <FloodMap
+            horizonHours={24}
+            layers={layers}
+            height="420px"
+            selectedLocation={selectedLocation}
+            predictionResult={predictionResult}
+            inundationGeoJson={predictionResult?.inundation?.geojson}
+          />
 
           {/* Floating Legend on Map */}
           <div className="absolute top-3 right-3 z-1000 max-w-xs">

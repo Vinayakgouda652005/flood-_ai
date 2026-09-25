@@ -14,15 +14,30 @@ import {
   BASIN_LOCATIONS,
 } from './data/mockData.js';
 
+// Dynamic helper to obtain current date formatted as YYYY-MM-DD
+const getTodayIsoDate = () => {
+  const now = new Date();
+  const year = now.getFullYear();
+  const month = String(now.getMonth() + 1).padStart(2, '0');
+  const day = String(now.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+};
+
 export function App() {
   const [currentPage, setCurrentPage] = useState('dashboard');
   const [isMobileNavOpen, setIsMobileNavOpen] = useState(false);
+
+  // Basins & baseline summary state
   const [basins, setBasins] = useState(BASIN_LOCATIONS);
   const [selectedBasinId, setSelectedBasinId] = useState(BASIN_LOCATIONS[0].id);
   const [summary, setSummary] = useState(CURRENT_SUMMARY);
   const [timeline, setTimeline] = useState(FORECAST_TIMELINE);
-  const [lastPredictionResult, setLastPredictionResult] = useState(null);
   const [isRefreshing, setIsRefreshing] = useState(false);
+
+  // Requirement 13 State Management
+  const [selectedLocation, setSelectedLocation] = useState(null);
+  const [selectedDate, setSelectedDate] = useState(getTodayIsoDate());
+  const [predictionResult, setPredictionResult] = useState(null);
 
   // Initialize and load basin data
   useEffect(() => {
@@ -32,6 +47,18 @@ export function App() {
         const basinList = await floodService.getBasins();
         if (isMounted && basinList.length > 0) {
           setBasins(basinList);
+          // If no location has been selected by user yet, initialize with default basin
+          setSelectedLocation((prev) => {
+            if (!prev) {
+              return {
+                name: basinList[0].name,
+                latitude: basinList[0].center[0],
+                longitude: basinList[0].center[1],
+                isCurrentLocation: false,
+              };
+            }
+            return prev;
+          });
         }
       } catch (err) {
         console.error('Failed to load basins:', err);
@@ -43,7 +70,7 @@ export function App() {
     };
   }, []);
 
-  // When basin changes, update summary
+  // When basin changes, update summary & sync selectedLocation if not overridden
   useEffect(() => {
     let isMounted = true;
     async function updateBasinContext() {
@@ -64,6 +91,19 @@ export function App() {
     };
   }, [selectedBasinId]);
 
+  const handleSelectBasin = (basinId) => {
+    setSelectedBasinId(basinId);
+    const found = basins.find((b) => b.id === basinId);
+    if (found) {
+      setSelectedLocation({
+        name: found.name,
+        latitude: found.center[0],
+        longitude: found.center[1],
+        isCurrentLocation: false,
+      });
+    }
+  };
+
   const handleRefresh = async () => {
     setIsRefreshing(true);
     try {
@@ -79,25 +119,14 @@ export function App() {
   };
 
   const handlePredictionCompleted = (result) => {
-    setLastPredictionResult(result);
-    // Update summary with the new prediction result values
-    setSummary((prev) => ({
-      ...prev,
-      predictedFloodedAreaKm2: result.projectedFloodedAreaKm2,
-      maxWaterDepthMeters: result.maxDepthMeters,
-      riskLevel: result.riskLevel,
-      highRiskAreaKm2: result.highRiskAreaKm2,
-      moderateRiskAreaKm2: result.moderateRiskAreaKm2,
-      lowRiskAreaKm2: result.lowRiskAreaKm2,
-      affectedLocationsCount: result.affectedLocationsCount,
-      riverLevelMeters: result.parameters.forecastRiverLevel,
-      rainfallMm: result.parameters.rainfall,
-      forecastHorizonHours: result.forecastDurationHours,
-      lastUpdated: 'Just now (Custom Model Run)',
-    }));
-
-    if (result.timeSteps && result.timeSteps.length > 0) {
-      setTimeline(result.timeSteps);
+    setPredictionResult(result);
+    if (result) {
+      setSummary((prev) => ({
+        ...prev,
+        riskLevel: result.risk_level || prev.riskLevel,
+        locationName: result.locationName || prev.locationName,
+        lastUpdated: `Just now (AI Run: ${result.date})`,
+      }));
     }
   };
 
@@ -119,10 +148,11 @@ export function App() {
         <Header
           basins={basins}
           selectedBasinId={selectedBasinId}
-          onSelectBasin={setSelectedBasinId}
+          onSelectBasin={handleSelectBasin}
           onToggleMobileSidebar={() => setIsMobileNavOpen(!isMobileNavOpen)}
           onRefresh={handleRefresh}
           isRefreshing={isRefreshing}
+          selectedLocation={selectedLocation}
         />
 
         {/* Scrollable Page Body */}
@@ -133,15 +163,20 @@ export function App() {
                 onNavigate={setCurrentPage}
                 summary={summary}
                 timelineData={timeline}
+                selectedLocation={selectedLocation}
+                predictionResult={predictionResult}
               />
             )}
 
             {currentPage === 'prediction' && (
               <Prediction
-                basins={basins}
                 onNavigate={setCurrentPage}
-                onPredictionCompleted={handlePredictionCompleted}
-                lastResult={lastPredictionResult}
+                selectedLocation={selectedLocation}
+                setSelectedLocation={setSelectedLocation}
+                selectedDate={selectedDate}
+                setSelectedDate={setSelectedDate}
+                predictionResult={predictionResult}
+                setPredictionResult={handlePredictionCompleted}
               />
             )}
 
@@ -149,6 +184,8 @@ export function App() {
               <InundationMap
                 basin={selectedBasin}
                 summary={summary}
+                selectedLocation={selectedLocation}
+                predictionResult={predictionResult}
               />
             )}
 
@@ -156,6 +193,8 @@ export function App() {
               <Forecast
                 timelineData={timeline}
                 summary={summary}
+                selectedLocation={selectedLocation}
+                selectedDate={selectedDate}
               />
             )}
 
