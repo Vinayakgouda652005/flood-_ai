@@ -1,0 +1,7 @@
+{
+  "name": "Flood Inundation Projection System",
+  "description": "Projection of the extent of inundation corresponding to the forecasts of flood levels in a river.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
+
