@@ -47,10 +47,18 @@ def init_db() -> None:
     """
     Creates all database tables defined in SQLAlchemy models if they do not exist.
     """
+    global engine, SessionLocal
     try:
         # Import models here to register metadata
         import app.models  # noqa: F401
         Base.metadata.create_all(bind=engine)
         logger.info("Database tables verified/initialized successfully.")
     except Exception as e:
-        logger.error(f"Error during database initialization: {e}")
+        logger.warning(
+            f"Database initialization with primary URL failed ({e}). "
+            "Falling back to local SQLite engine (flood_inundation_db.db) for development."
+        )
+        engine = create_engine("sqlite:///./flood_inundation_db.db", connect_args={"check_same_thread": False})
+        SessionLocal.configure(bind=engine)
+        Base.metadata.create_all(bind=engine)
+        logger.info("Fallback SQLite database initialized successfully.")

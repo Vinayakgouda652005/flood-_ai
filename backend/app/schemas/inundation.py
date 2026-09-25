@@ -4,23 +4,20 @@ from pydantic import BaseModel, ConfigDict
 
 
 class InundationCreate(BaseModel):
+    prediction_id: Optional[int] = None
     prediction_request_id: Optional[int] = None
-    horizon_hours: int = 24
+    geojson: Optional[str] = None
+    maximum_depth: Optional[float] = None
     flooded_area_km2: Optional[float] = None
-    max_depth_m: Optional[float] = None
-    avg_depth_m: Optional[float] = None
-    geojson_data: Optional[str] = None
-    status: str = "PENDING_AI_MODEL"
 
 
 class InundationResponse(BaseModel):
     available: bool = False
-    prediction_request_id: Optional[int] = None
-    horizon_hours: int = 24
-    flooded_area_km2: Optional[float] = None
-    max_depth_m: Optional[float] = None
-    avg_depth_m: Optional[float] = None
     geojson: Optional[Any] = None
-    message: str
+    maximum_depth: Optional[float] = None
+    flooded_area_km2: Optional[float] = None
+    prediction_id: Optional[int] = None
+    prediction_request_id: Optional[int] = None
+    message: Optional[str] = None
 
     model_config = ConfigDict(from_attributes=True)

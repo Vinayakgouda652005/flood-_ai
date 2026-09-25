@@ -12,15 +12,17 @@ router = APIRouter(prefix="/api/inundation", tags=["Inundation"])
 
 @router.get("", response_model=InundationResponse)
 def get_inundation_layer(
-    latitude: float = Query(..., ge=-90.0, le=90.0),
-    longitude: float = Query(..., ge=-180.0, le=180.0),
+    latitude: Optional[float] = Query(None, ge=-90.0, le=90.0),
+    longitude: Optional[float] = Query(None, ge=-180.0, le=180.0),
     date: Optional[str] = Query(None, description="Date in YYYY-MM-DD format"),
     request_id: Optional[int] = Query(None, description="Associated prediction request ID"),
+    prediction_id: Optional[int] = Query(None, description="Associated prediction ID"),
     db: Session = Depends(get_db),
 ):
     """
-    Retrieves spatial inundation polygons and depth maps for a prediction request.
-    Returns available=False if no hydrodynamic simulation has been run and stored.
+    Retrieves spatial inundation polygons and depth maps for a prediction.
+    Strictly queries stored records; returns available=False and geojson=null if no result exists.
+    Never returns results belonging to another location or date.
     """
     if date:
         try:
@@ -37,6 +39,7 @@ def get_inundation_layer(
         longitude=longitude,
         date=date,
         request_id=request_id,
+        prediction_id=prediction_id,
     )
 
 
@@ -46,7 +49,14 @@ def save_inundation_simulation(
     db: Session = Depends(get_db),
 ):
     """
-    Ingest hydraulic or GIS inundation simulation result.
+    Ingest hydraulic or GIS inundation simulation result linked to a prediction.
     """
-    record = inundation_service.save_inundation(db=db, data=data)
-    return {"message": "Inundation record saved successfully", "id": record.id}
+    try:
+        record = inundation_service.save_inundation(db=db, data=data)
+        return {
+            "message": "Inundation record saved successfully",
+            "id": record.id,
+            "prediction_id": record.prediction_id,
+        }
+    except ValueError as e:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))

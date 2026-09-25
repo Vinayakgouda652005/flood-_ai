@@ -16,14 +16,15 @@ router = APIRouter(prefix="/api/forecast", tags=["Forecast"])
 
 @router.get("", response_model=ForecastResponse)
 def get_environmental_forecast(
-    latitude: float = Query(..., ge=-90.0, le=90.0),
-    longitude: float = Query(..., ge=-180.0, le=180.0),
+    location_id: Optional[int] = Query(None, description="Location ID to query"),
+    latitude: Optional[float] = Query(None, ge=-90.0, le=90.0),
+    longitude: Optional[float] = Query(None, ge=-180.0, le=180.0),
     date: Optional[str] = Query(None, description="Date in YYYY-MM-DD format"),
     db: Session = Depends(get_db),
 ):
     """
-    Retrieves environmental observation and forecast records for coordinates.
-    Strictly queries real database records; does not generate fake readings.
+    Retrieves environmental observation and forecast records from PostgreSQL.
+    Strictly queries real database records; does NOT generate fake or random readings.
     """
     if date:
         try:
@@ -36,6 +37,7 @@ def get_environmental_forecast(
 
     return forecast_service.get_environmental_forecast(
         db=db,
+        location_id=location_id,
         latitude=latitude,
         longitude=longitude,
         target_date=date,
@@ -48,8 +50,9 @@ def record_environmental_features(
     db: Session = Depends(get_db),
 ):
     """
-    Ingest verified environmental features (rainfall, discharge, elevation, soil)
-    used for AI model training and evaluation.
+    Ingest verified environmental features into the database.
+    This is ONLY a database storage/test endpoint.
+    Does not produce AI predictions.
     """
     record = forecast_service.record_environmental_data(db=db, data=data)
     return record

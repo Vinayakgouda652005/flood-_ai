@@ -22,9 +22,8 @@ def health_check(db: Session = Depends(get_db)):
         db_status = f"unavailable: {str(e)}"
 
     return {
-        "status": "healthy" if "unavailable" not in db_status else "degraded",
+        "status": "ok",
         "service": settings.PROJECT_NAME,
-        "version": settings.VERSION,
         "database": db_status,
         "timestamp": datetime.now(timezone.utc).isoformat(),
     }

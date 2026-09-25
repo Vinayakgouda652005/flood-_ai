@@ -4,7 +4,8 @@ from datetime import datetime
 from typing import Optional, Any
 from sqlalchemy.orm import Session
 
-from app.models.inundation import Inundation
+from app.models.inundation import InundationResult
+from app.models.prediction import Prediction
 from app.models.prediction_request import PredictionRequest
 from app.models.location import Location
 from app.schemas.inundation import InundationResponse, InundationCreate
@@ -15,37 +16,49 @@ logger = logging.getLogger("flood_backend.inundation_service")
 class InundationService:
     """
     Manages spatial inundation geometries, depth maps, and flooded area projections.
+
     STRICT RETRIEVAL POLICY:
     - Never return the latest inundation record globally.
-    - Inundation results must strictly correspond to the requested prediction_request_id
-      or the exact location (within strict tolerance) + date.
+    - Inundation results must strictly correspond to the requested prediction_id,
+      prediction_request_id, or the exact location + date.
+    - If no result exists: return available=False and geojson=null.
     """
 
     @staticmethod
     def get_inundation(
         db: Session,
-        latitude: float,
-        longitude: float,
+        latitude: Optional[float] = None,
+        longitude: Optional[float] = None,
         date: Optional[str] = None,
         request_id: Optional[int] = None,
+        prediction_id: Optional[int] = None,
     ) -> InundationResponse:
-        inundation: Optional[Inundation] = None
+        inundation: Optional[InundationResult] = None
 
-        if request_id is not None:
-            # Strictly match by prediction_request_id
+        if prediction_id is not None:
+            # 1. Match strictly by prediction_id
             inundation = (
-                db.query(Inundation)
-                .filter(Inundation.prediction_request_id == request_id)
+                db.query(InundationResult)
+                .filter(InundationResult.prediction_id == prediction_id)
                 .first()
             )
-        elif date:
-            # Strictly match by exact location coordinates and date
+        elif request_id is not None:
+            # 2. Match strictly by prediction_request_id via Prediction
+            inundation = (
+                db.query(InundationResult)
+                .join(Prediction, InundationResult.prediction_id == Prediction.id)
+                .filter(Prediction.prediction_request_id == request_id)
+                .first()
+            )
+        elif date and latitude is not None and longitude is not None:
+            # 3. Match strictly by exact location coordinates and date
             try:
-                parsed_date = datetime.strptime(date, "%Y-%m-%d").date()
+                parsed_date = datetime.strptime(date.strip(), "%Y-%m-%d").date()
                 coord_tolerance = 0.01  # strict ~1km tolerance
                 inundation = (
-                    db.query(Inundation)
-                    .join(PredictionRequest, Inundation.prediction_request_id == PredictionRequest.id)
+                    db.query(InundationResult)
+                    .join(Prediction, InundationResult.prediction_id == Prediction.id)
+                    .join(PredictionRequest, Prediction.prediction_request_id == PredictionRequest.id)
                     .join(Location, PredictionRequest.location_id == Location.id)
                     .filter(
                         PredictionRequest.prediction_date == parsed_date,
@@ -57,50 +70,73 @@ class InundationService:
             except ValueError:
                 inundation = None
 
-        # Do NOT fall back to any global record; strict return if not found
-        if not inundation or not inundation.geojson_data:
+        # Strictly return available=False if no exact matching record is in PostgreSQL
+        if not inundation or not inundation.geojson:
             return InundationResponse(
                 available=False,
-                prediction_request_id=request_id,
-                horizon_hours=24,
-                flooded_area_km2=None,
-                max_depth_m=None,
-                avg_depth_m=None,
                 geojson=None,
-                message="No spatial inundation projection found for the specified request ID or location and date.",
+                maximum_depth=None,
+                flooded_area_km2=None,
+                prediction_id=prediction_id,
+                prediction_request_id=request_id,
+                message="No inundation record exists for the requested parameters.",
             )
 
-        # Parse stored GeoJSON
+        # Parse stored GeoJSON if stored as text
+        parsed_geojson = None
         try:
-            parsed_geojson = json.loads(inundation.geojson_data) if isinstance(inundation.geojson_data, str) else inundation.geojson_data
+            if isinstance(inundation.geojson, str):
+                parsed_geojson = json.loads(inundation.geojson)
+            else:
+                parsed_geojson = inundation.geojson
         except Exception as e:
             logger.warning(f"Error parsing GeoJSON data for inundation {inundation.id}: {e}")
             parsed_geojson = None
 
         return InundationResponse(
             available=True,
-            prediction_request_id=inundation.prediction_request_id,
-            horizon_hours=inundation.horizon_hours,
-            flooded_area_km2=inundation.flooded_area_km2,
-            max_depth_m=inundation.max_depth_m,
-            avg_depth_m=inundation.avg_depth_m,
             geojson=parsed_geojson,
-            message="Inundation spatial projection retrieved successfully.",
+            maximum_depth=inundation.maximum_depth,
+            flooded_area_km2=inundation.flooded_area_km2,
+            prediction_id=inundation.prediction_id,
+            prediction_request_id=request_id,
+            message="Inundation spatial result retrieved from database.",
         )
 
     @staticmethod
     def save_inundation(
         db: Session,
         data: InundationCreate,
-    ) -> Inundation:
-        record = Inundation(
-            prediction_request_id=data.prediction_request_id,
-            horizon_hours=data.horizon_hours,
+    ) -> InundationResult:
+        """
+        Stores verified inundation simulation result.
+        """
+        # Resolve prediction_id if prediction_request_id was provided
+        pred_id = data.prediction_id
+        if pred_id is None and data.prediction_request_id is not None:
+            pred = db.query(Prediction).filter(Prediction.prediction_request_id == data.prediction_request_id).first()
+            if pred:
+                pred_id = pred.id
+            else:
+                # Create a placeholder prediction record linked to the request if none exists yet
+                new_pred = Prediction(
+                    prediction_request_id=data.prediction_request_id,
+                    flood_probability=None,
+                    risk_level="PENDING",
+                )
+                db.add(new_pred)
+                db.commit()
+                db.refresh(new_pred)
+                pred_id = new_pred.id
+
+        if pred_id is None:
+            raise ValueError("prediction_id or valid prediction_request_id is required to store inundation result.")
+
+        record = InundationResult(
+            prediction_id=pred_id,
+            geojson=data.geojson,
+            maximum_depth=data.maximum_depth,
             flooded_area_km2=data.flooded_area_km2,
-            max_depth_m=data.max_depth_m,
-            avg_depth_m=data.avg_depth_m,
-            geojson_data=data.geojson_data,
-            status=data.status,
         )
         db.add(record)
         db.commit()

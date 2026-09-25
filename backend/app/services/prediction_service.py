@@ -9,18 +9,18 @@ from app.models.location import Location
 from app.models.prediction_request import PredictionRequest
 from app.models.prediction import Prediction
 from app.models.environmental_data import EnvironmentalData
-from app.models.inundation import Inundation
+from app.models.inundation import InundationResult
 from app.schemas.prediction import (
     PredictionRequestCreate,
     PredictionResponse,
     PredictionInundationSummary,
     PredictionHistoryItem,
+    LocationNested,
 )
-from app.services.model_service import model_service
 
 logger = logging.getLogger("flood_backend.prediction_service")
 
-# Exact 13 features required before AI model inference
+# 13 features reserved for future AI model integration milestone
 REQUIRED_MODEL_FEATURES = [
     "latitude",
     "longitude",
@@ -40,24 +40,19 @@ REQUIRED_MODEL_FEATURES = [
 
 class PredictionService:
     """
-    Handles logging, feature validation, and execution lifecycle for flood predictions.
+    Handles validation, location resolution, and PostgreSQL logging
+    for flood prediction requests.
 
-    STRICT DIRECTIVES:
-    - Return HTTP 400 for an invalid YYYY-MM-DD date (never silently convert to today's date).
-    - Look up verified environmental data from PostgreSQL; NEVER synthesize or fake environmental data.
-    - Validate all 13 required model features before attempting AI inference.
-    - Do not fill missing model features with fake values.
-    - If environmental data or required features are missing, return a truthful data-unavailable response.
-    - Keep risk classification isolated in this service so it can be calibrated when the model is trained.
-    - Call model_service to execute inference when model is loaded.
-    - Store real predictions in the database and return truthful responses.
+    MILESTONE STATUS:
+    - AI Model integration is deliberately deferred until database integration is verified.
+    - Zero fake/synthetic probabilities or mock model results.
+    - Logs requests to PostgreSQL with status 'WAITING_FOR_AI_MODEL'.
     """
 
     @staticmethod
     def classify_risk(flood_probability: Optional[float]) -> str:
         """
-        Isolated risk classification policy.
-        Can be easily adjusted or calibrated once the trained model's ROC/PR curves are finalized.
+        Isolated risk classification policy reserved for future AI model inference.
         """
         if flood_probability is None:
             return "PENDING"
@@ -75,10 +70,11 @@ class PredictionService:
         name: Optional[str] = None,
     ) -> Location:
         """
-        Locates an existing location within a tight coordinate tolerance (~1km),
-        or registers a new location record in the database.
+        Locates an existing location within ~500m coordinate tolerance,
+        or registers a new location record in the PostgreSQL database.
+        Prevents unnecessary duplicate location records.
         """
-        tolerance = 0.01  # ~1.1 km
+        tolerance = 0.005  # ~500m
         location = (
             db.query(Location)
             .filter(
@@ -98,7 +94,7 @@ class PredictionService:
             db.add(location)
             db.commit()
             db.refresh(location)
-            logger.info(f"Registered new location in database: id={location.id} name='{location.name}'")
+            logger.info(f"Registered new location in PostgreSQL: id={location.id} name='{location.name}'")
         elif name and (location.name.startswith("Coordinates (") or not location.name):
             location.name = name
             db.commit()
@@ -113,22 +109,33 @@ class PredictionService:
         request_data: PredictionRequestCreate,
     ) -> PredictionResponse:
         """
-        Processes a user-driven prediction request with end-to-end truthfulness:
-        1. Validates the request date strictly (HTTP 400 on invalid format).
-        2. Resolves / registers location in PostgreSQL.
-        3. Logs prediction request in `prediction_requests`.
-        4. Retrieves real environmental data for (location_id, date).
-        5. Validates that all 13 required model features are available (no fake values).
-        6. Calls model_service to execute inference.
-        7. Classifies risk using isolated classification policy.
-        8. Stores prediction in database and returns the result.
+        Database-only prediction request lifecycle:
+        1. Validate latitude and longitude.
+        2. Validate date strictly (HTTP 400 for invalid formats).
+        3. Find or create location in PostgreSQL.
+        4. Create a prediction_request record with status 'WAITING_FOR_AI_MODEL'.
+        5. Return prediction request information without calling AI model.
         """
-        # Step 1: Validate date strictly
+        # Step 1: Validate latitude and longitude
+        lat = request_data.latitude
+        lon = request_data.longitude
+        if lat < -90.0 or lat > 90.0:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Invalid latitude: {lat}. Must be between -90 and 90.",
+            )
+        if lon < -180.0 or lon > 180.0:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Invalid longitude: {lon}. Must be between -180 and 180.",
+            )
+
+        # Step 2: Validate date strictly (strict YYYY-MM-DD, HTTP 400 on error)
         raw_date = request_data.date
         if not raw_date or not isinstance(raw_date, str):
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Date must be provided as a YYYY-MM-DD string.",
+                detail="Date must be provided as a non-empty YYYY-MM-DD string.",
             )
         try:
             pred_date = datetime.strptime(raw_date.strip(), "%Y-%m-%d").date()
@@ -138,209 +145,67 @@ class PredictionService:
                 detail=f"Invalid date format: '{raw_date}'. Prediction date must strictly follow YYYY-MM-DD format.",
             )
 
-        # Step 2: Ensure location exists in database
+        # Step 3: Find or create location in PostgreSQL
+        loc_name = request_data.location_name or request_data.name
         location = cls.get_or_create_location(
             db=db,
-            latitude=request_data.latitude,
-            longitude=request_data.longitude,
-            name=request_data.location_name,
+            latitude=lat,
+            longitude=lon,
+            name=loc_name,
         )
 
-        # Step 3: Log prediction request in PostgreSQL
+        # Step 4: Create prediction_request record in PostgreSQL
         prediction_req = PredictionRequest(
             location_id=location.id,
             prediction_date=pred_date,
-            status="PENDING_AI_MODEL",
+            status="WAITING_FOR_AI_MODEL",
         )
         db.add(prediction_req)
         db.commit()
         db.refresh(prediction_req)
+        logger.info(
+            f"Logged prediction request in PostgreSQL: id={prediction_req.id}, "
+            f"location_id={location.id}, date={pred_date}, status='WAITING_FOR_AI_MODEL'"
+        )
 
-        # Step 4: Check if an existing evaluated prediction record is already saved for this request
+        # Step 5: Check if an evaluated prediction already exists in DB
         existing_prediction = (
             db.query(Prediction)
             .filter(Prediction.prediction_request_id == prediction_req.id)
             .first()
         )
-        if existing_prediction:
-            return PredictionResponse(
-                latitude=location.latitude,
-                longitude=location.longitude,
-                date=str(pred_date),
-                status="COMPLETED",
-                message="Retrieved existing prediction record from database.",
-                location_name=location.name,
-                flood_probability=existing_prediction.flood_probability,
-                risk_level=existing_prediction.risk_level or "UNKNOWN",
-                flood_occurred=existing_prediction.flood_occurred,
-                inundation=PredictionInundationSummary(available=False, geojson=None),
-                request_id=prediction_req.id,
-                created_at=prediction_req.created_at,
-            )
 
-        # Step 5: Retrieve real environmental data for location and date
-        env_record = (
-            db.query(EnvironmentalData)
-            .filter(
-                EnvironmentalData.location_id == location.id,
-                EnvironmentalData.date == pred_date,
-            )
-            .first()
-        )
+        flood_prob = existing_prediction.flood_probability if existing_prediction else None
+        risk = existing_prediction.risk_level if existing_prediction else "PENDING"
+        occurred = existing_prediction.flood_occurred if existing_prediction else None
+        current_status = "COMPLETED" if (existing_prediction and flood_prob is not None) else "WAITING_FOR_AI_MODEL"
 
-        if not env_record:
-            # Also check by tight coordinate match for the date in case coordinates were registered nearby
-            coord_tolerance = 0.01
-            env_record = (
-                db.query(EnvironmentalData)
-                .filter(
-                    EnvironmentalData.date == pred_date,
-                    EnvironmentalData.latitude.between(location.latitude - coord_tolerance, location.latitude + coord_tolerance),
-                    EnvironmentalData.longitude.between(location.longitude - coord_tolerance, location.longitude + coord_tolerance),
-                )
-                .first()
-            )
-
-        if not env_record:
-            # Truthful response: real environmental data is not yet available for this location & date
-            prediction_req.status = "DATA_UNAVAILABLE"
-            db.commit()
-            return PredictionResponse(
-                latitude=location.latitude,
-                longitude=location.longitude,
-                date=str(pred_date),
-                status="DATA_UNAVAILABLE",
-                message=(
-                    f"Environmental data is unavailable for location '{location.name}' on {pred_date}. "
-                    "Actual hydrometric and meteorological observations must be ingested before inference."
-                ),
-                location_name=location.name,
-                flood_probability=None,
-                risk_level="PENDING",
-                flood_occurred=None,
-                inundation=PredictionInundationSummary(available=False, geojson=None),
-                request_id=prediction_req.id,
-                created_at=prediction_req.created_at,
-            )
-
-        # Step 6: Validate that all 13 required features are present and non-null (no fake values!)
-        feature_dict = {
-            "latitude": env_record.latitude,
-            "longitude": env_record.longitude,
-            "rainfall_mm": env_record.rainfall_mm,
-            "temperature_c": env_record.temperature_c,
-            "humidity_pct": env_record.humidity_pct,
-            "river_discharge_m3s": env_record.river_discharge_m3s,
-            "water_level_m": env_record.water_level_m,
-            "elevation_m": env_record.elevation_m,
-            "land_cover": env_record.land_cover,
-            "soil_type": env_record.soil_type,
-            "population_density": env_record.population_density,
-            "infrastructure": env_record.infrastructure,
-            "historical_floods": env_record.historical_floods,
-        }
-
-        missing_features = [
-            feat_name for feat_name, feat_val in feature_dict.items() if feat_val is None
-        ]
-
-        if missing_features:
-            prediction_req.status = "INCOMPLETE_FEATURES"
-            db.commit()
-            return PredictionResponse(
-                latitude=location.latitude,
-                longitude=location.longitude,
-                date=str(pred_date),
-                status="INCOMPLETE_FEATURES",
-                message=(
-                    f"Missing required model features: {', '.join(missing_features)}. "
-                    "Features cannot be filled with fake values."
-                ),
-                location_name=location.name,
-                flood_probability=None,
-                risk_level="PENDING",
-                flood_occurred=None,
-                inundation=PredictionInundationSummary(available=False, geojson=None),
-                request_id=prediction_req.id,
-                created_at=prediction_req.created_at,
-            )
-
-        # Step 7: Check model availability and execute inference via model_service
-        if not model_service.is_model_available:
-            prediction_req.status = "PENDING_AI_MODEL"
-            db.commit()
-            return PredictionResponse(
-                latitude=location.latitude,
-                longitude=location.longitude,
-                date=str(pred_date),
-                status="PENDING_AI_MODEL",
-                message=(
-                    "Environmental features are verified and complete. "
-                    "AI model artifact ('flood_prediction_model.pkl') is pending placement in backend/models/."
-                ),
-                location_name=location.name,
-                flood_probability=None,
-                risk_level="PENDING",
-                flood_occurred=None,
-                inundation=PredictionInundationSummary(available=False, geojson=None),
-                request_id=prediction_req.id,
-                created_at=prediction_req.created_at,
-            )
-
-        inference_result = model_service.predict(feature_dict)
-        if not inference_result.get("success"):
-            prediction_req.status = "INFERENCE_FAILED"
-            db.commit()
-            return PredictionResponse(
-                latitude=location.latitude,
-                longitude=location.longitude,
-                date=str(pred_date),
-                status="INFERENCE_FAILED",
-                message=inference_result.get("message", "Model inference failed."),
-                location_name=location.name,
-                flood_probability=None,
-                risk_level="PENDING",
-                flood_occurred=None,
-                inundation=PredictionInundationSummary(available=False, geojson=None),
-                request_id=prediction_req.id,
-                created_at=prediction_req.created_at,
-            )
-
-        # Step 8: Apply isolated risk classification & persist prediction
-        prob = inference_result["flood_probability"]
-        flood_flag = inference_result["flood_occurred"]
-        risk = cls.classify_risk(prob)
-
-        new_pred = Prediction(
-            prediction_request_id=prediction_req.id,
-            flood_probability=prob,
-            risk_level=risk,
-            flood_occurred=flood_flag,
-        )
-        db.add(new_pred)
-        prediction_req.status = "COMPLETED"
-        db.commit()
-        db.refresh(new_pred)
-
+        # Step 6: Return database-backed request info (DO NOT generate fake probability)
         return PredictionResponse(
+            status=current_status,
+            prediction_request_id=prediction_req.id,
+            location=LocationNested(
+                name=location.name,
+                latitude=location.latitude,
+                longitude=location.longitude,
+            ),
+            date=str(pred_date),
+            request_id=prediction_req.id,
             latitude=location.latitude,
             longitude=location.longitude,
-            date=str(pred_date),
-            status="COMPLETED",
-            message="Flood prediction successfully generated by AI model.",
             location_name=location.name,
-            flood_probability=prob,
+            flood_probability=flood_prob,
             risk_level=risk,
-            flood_occurred=flood_flag,
+            flood_occurred=occurred,
             inundation=PredictionInundationSummary(available=False, geojson=None),
-            request_id=prediction_req.id,
+            message="Prediction request recorded in PostgreSQL. WAITING_FOR_AI_MODEL.",
             created_at=prediction_req.created_at,
         )
 
     @classmethod
     def get_history(cls, db: Session, limit: int = 50) -> List[PredictionHistoryItem]:
         """
-        Retrieves recent prediction requests with associated location and prediction records.
+        Retrieves recent prediction requests with associated location from PostgreSQL.
         """
         results = (
             db.query(PredictionRequest)
@@ -375,7 +240,7 @@ class PredictionService:
     @classmethod
     def get_by_id(cls, db: Session, request_id: int) -> Optional[PredictionResponse]:
         """
-        Retrieves a specific prediction request by ID.
+        Retrieves a specific prediction request by ID from PostgreSQL.
         """
         req = db.query(PredictionRequest).filter(PredictionRequest.id == request_id).first()
         if not req:
@@ -385,17 +250,23 @@ class PredictionService:
         pred = req.prediction
 
         return PredictionResponse(
+            status=req.status,
+            prediction_request_id=req.id,
+            location=LocationNested(
+                name=loc.name if loc else "Unknown",
+                latitude=loc.latitude if loc else 0.0,
+                longitude=loc.longitude if loc else 0.0,
+            ),
+            date=str(req.prediction_date),
+            request_id=req.id,
             latitude=loc.latitude if loc else 0.0,
             longitude=loc.longitude if loc else 0.0,
-            date=str(req.prediction_date),
-            status=req.status,
-            message="Prediction request retrieved from database.",
             location_name=loc.name if loc else None,
             flood_probability=pred.flood_probability if pred else None,
             risk_level=pred.risk_level if pred else "PENDING",
             flood_occurred=pred.flood_occurred if pred else None,
             inundation=PredictionInundationSummary(available=False, geojson=None),
-            request_id=req.id,
+            message="Prediction request retrieved from database.",
             created_at=req.created_at,
         )
 

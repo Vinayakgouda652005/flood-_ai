@@ -6,75 +6,33 @@ Production-ready Python FastAPI backend and PostgreSQL database with SQLAlchemy 
 
 ## 1. System Architecture
 
-```
-React + Vite Frontend (Port 3000)
+```text
+React Frontend (Port 5173 / 3000)
        │
        │ HTTP / JSON (VITE_API_BASE_URL=http://localhost:8000)
        ▼
-FastAPI Application (Port 8000)
+FastAPI Backend (Port 8000)
        │
        ├── CORS Middleware (Cross-Origin Resource Sharing)
-       ├── API Routes (/api/predict, /api/locations, /api/forecast, /api/inundation, /health)
-       ├── Pydantic Schemas (Input/Output data validation)
-       ├── Service Layer (Business logic & future AI model hooks)
+       ├── API Routes (/api/predict, /api/locations, /api/forecast, /api/inundation, /api/health)
+       ├── Pydantic Schemas (Input/Output data validation & strict YYYY-MM-DD checks)
+       ├── Service Layer (prediction_service.py, forecast_service.py, inundation_service.py)
        └── SQLAlchemy ORM Layer
               │
               ▼
-PostgreSQL Database (Tables: locations, prediction_requests, predictions, environmental_data, inundations)
+PostgreSQL Database (flood_inundation_db)
+       ├── locations
+       ├── prediction_requests
+       ├── predictions
+       ├── environmental_data
+       └── inundation_results
 ```
 
 ---
 
-## 2. Directory Structure
+## 2. Database Schema & Tables
 
-```
-backend/
-├── app/
-│   ├── __init__.py
-│   ├── main.py                     # FastAPI application entry point & CORS configuration
-│   ├── core/
-│   │   ├── __init__.py
-│   │   ├── config.py               # Pydantic Settings & environment variables
-│   │   └── database.py             # SQLAlchemy engine, session maker, & Base
-│   ├── models/
-│   │   ├── __init__.py
-│   │   ├── location.py             # locations table model
-│   │   ├── prediction_request.py   # prediction_requests table model
-│   │   ├── prediction.py           # predictions table model
-│   │   ├── environmental_data.py   # environmental_data table model (with UniqueConstraint(location_id, date))
-│   │   └── inundation.py           # inundations table model
-│   ├── schemas/
-│   │   ├── __init__.py
-│   │   ├── location.py             # Location schemas
-│   │   ├── prediction.py           # Prediction request & response schemas (strict YYYY-MM-DD validator)
-│   │   ├── forecast.py             # Environmental feature schemas
-│   │   └── inundation.py           # Inundation geometry schemas
-│   ├── routes/
-│   │   ├── __init__.py
-│   │   ├── health.py               # Health check endpoint
-│   │   ├── locations.py            # Location query & registration endpoints
-│   │   ├── prediction.py           # Prediction endpoints (POST /api/predict)
-│   │   ├── forecast.py             # Environmental observation endpoints (strict date validation)
-│   │   └── inundation.py           # Spatial inundation layer endpoints (strict retrieval)
-│   └── services/
-│       ├── __init__.py
-│       ├── model_service.py        # Dedicated AI model loading & inference service
-│       ├── prediction_service.py   # Validates features, coordinates location, calls model_service & stores prediction
-│       ├── forecast_service.py     # Real environmental observations query & storage
-│       └── inundation_service.py   # Strict spatial inundation retrieval by request_id or exact location+date
-├── models/
-│   ├── README.md                   # Model artifact directory instructions
-│   └── flood_prediction_model.pkl  # <-- Trained AI model artifact will be placed here
-├── requirements.txt                # Python dependencies
-├── .env.example                    # Template environment variables
-└── README.md                       # Documentation
-```
-
----
-
-## 3. Database Schema
-
-### Table: `locations`
+### Table 1: `locations`
 Stores geographical entities and monitored river basin sectors.
 - `id` (INTEGER, Primary Key, Autoincrement)
 - `name` (VARCHAR(255), Not Null)
@@ -82,30 +40,29 @@ Stores geographical entities and monitored river basin sectors.
 - `longitude` (FLOAT, Not Null)
 - `created_at` (TIMESTAMP WITH TIME ZONE, Default: now())
 
-### Table: `prediction_requests`
-Logs user-initiated prediction queries submitted from the frontend.
+### Table 2: `prediction_requests`
+Logs user-initiated prediction queries submitted from the frontend or API clients.
 - `id` (INTEGER, Primary Key, Autoincrement)
-- `location_id` (INTEGER, Foreign Key -> `locations.id`, Not Null)
+- `location_id` (INTEGER, Foreign Key -> `locations.id` ON DELETE CASCADE, Not Null)
 - `prediction_date` (DATE, Not Null)
-- `status` (VARCHAR(50), Default: `"PENDING_AI_MODEL"`)
+- `status` (VARCHAR(50), Default: `"WAITING_FOR_AI_MODEL"`)
 - `created_at` (TIMESTAMP WITH TIME ZONE, Default: now())
 
-### Table: `predictions`
-Stores evaluation results produced by trained machine learning models.
+### Table 3: `predictions`
+Stores evaluation results produced by trained machine learning models (AI model integration pending).
 - `id` (INTEGER, Primary Key, Autoincrement)
-- `prediction_request_id` (INTEGER, Foreign Key -> `prediction_requests.id`, Unique)
-- `flood_probability` (FLOAT, Nullable) — *Nullable until model evaluates*
-- `risk_level` (VARCHAR(50), Nullable)
+- `prediction_request_id` (INTEGER, Foreign Key -> `prediction_requests.id` ON DELETE CASCADE, Unique, Not Null)
+- `flood_probability` (FLOAT, Nullable)
 - `flood_occurred` (INTEGER, Nullable: 0 or 1)
+- `risk_level` (VARCHAR(50), Nullable)
 - `created_at` (TIMESTAMP WITH TIME ZONE, Default: now())
 
-### Table: `environmental_data`
-Stores real meteorological, hydrological, and geophysical features.
-**No fake values are automatically generated.**
+### Table 4: `environmental_data`
+Stores verified meteorological, hydrological, and geophysical observations.
+**No fake, synthetic, or randomly generated values.**
 - `id` (INTEGER, Primary Key, Autoincrement)
-- `location_id` (INTEGER, Foreign Key -> `locations.id`, Not Null)
+- `location_id` (INTEGER, Foreign Key -> `locations.id` ON DELETE CASCADE, Not Null)
 - `date` (DATE, Not Null)
-- **Constraint**: `UniqueConstraint("location_id", "date", name="uq_environmental_location_date")`
 - `latitude` (FLOAT, Not Null)
 - `longitude` (FLOAT, Not Null)
 - `rainfall_mm` (FLOAT, Nullable)
@@ -120,52 +77,75 @@ Stores real meteorological, hydrological, and geophysical features.
 - `infrastructure` (VARCHAR(255), Nullable)
 - `historical_floods` (INTEGER, Nullable)
 - `created_at` (TIMESTAMP WITH TIME ZONE, Default: now())
+- **Constraint**: `UniqueConstraint("location_id", "date", name="uq_environmental_location_date")`
 
-### Table: `inundations`
-Stores GIS polygon/extent outputs and flood depths.
+### Table 5: `inundation_results`
+Stores spatial GIS polygons, flooded areas, and maximum water depths.
 - `id` (INTEGER, Primary Key, Autoincrement)
-- `prediction_request_id` (INTEGER, Foreign Key -> `prediction_requests.id`, Nullable)
-- `horizon_hours` (INTEGER, Default: 24)
+- `prediction_id` (INTEGER, Foreign Key -> `predictions.id` ON DELETE CASCADE, Not Null, Index)
+- `geojson` (TEXT, Nullable)
+- `maximum_depth` (FLOAT, Nullable)
 - `flooded_area_km2` (FLOAT, Nullable)
-- `max_depth_m` (FLOAT, Nullable)
-- `avg_depth_m` (FLOAT, Nullable)
-- `geojson_data` (TEXT, Nullable)
-- `status` (VARCHAR(50), Default: `"PENDING_AI_MODEL"`)
 - `created_at` (TIMESTAMP WITH TIME ZONE, Default: now())
+
+---
+
+## 3. Database Relationships
+
+```text
+Location (1)
+   │
+   ├── (1:N) ──► PredictionRequest (N)
+   │                    │
+   │                    └── (1:1) ──► Prediction (1)
+   │                                     │
+   │                                     └── (1:N) ──► InundationResult (N)
+   │
+   └── (1:N) ──► EnvironmentalData (N)
+```
 
 ---
 
 ## 4. Setup & Execution
 
-### 1. Create a Python Virtual Environment
-```bash
-cd backend
-python3 -m venv venv
-source venv/bin/activate
+### 1. PostgreSQL Database Setup
+Create database in PostgreSQL:
+```sql
+CREATE DATABASE flood_inundation_db;
 ```
 
-### 2. Install Dependencies
-```bash
-pip install -r requirements.txt
-```
-
-### 3. Configure Environment Variables
+### 2. Configure Environment Variables
 Copy `.env.example` to `.env`:
 ```bash
 cp .env.example .env
 ```
-Update `DATABASE_URL` with your PostgreSQL connection string:
+Set your PostgreSQL credentials in `backend/.env`:
 ```ini
-DATABASE_URL=postgresql+psycopg2://postgres:password@localhost:5432/flood_db
+DATABASE_URL=postgresql://postgres:YOUR_PASSWORD@localhost:5432/flood_inundation_db
 ```
-*(Note: If PostgreSQL is not currently running locally, a SQLite fallback `sqlite:///./flood_db.db` is supported for local validation).*
 
-### 4. Run the FastAPI Server
-```bash
-uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+### 3. Run Backend Server
+
+#### Windows:
+```cmd
+cd backend
+python -m venv venv
+venv\Scripts\activate
+pip install -r requirements.txt
+uvicorn app.main:app --reload --port 8000
 ```
-The server will start on `http://localhost:8000`.
-Interactive OpenAPI docs are available at `http://localhost:8000/docs`.
+
+#### Linux / macOS:
+```bash
+cd backend
+python3 -m venv venv
+source venv/bin/activate
+pip install -r requirements.txt
+uvicorn app.main:app --reload --port 8000
+```
+
+The server starts at `http://localhost:8000`.
+OpenAPI documentation is available at `http://localhost:8000/docs`.
 
 ---
 
@@ -173,38 +153,134 @@ Interactive OpenAPI docs are available at `http://localhost:8000/docs`.
 
 | Method | Endpoint | Description |
 |---|---|---|
-| `GET` | `/health` / `/api/health` | System health & PostgreSQL connection check |
-| `POST` | `/api/predict` | Primary prediction endpoint (strict YYYY-MM-DD validation) |
-| `GET` | `/api/predict/history` | List recent prediction requests |
-| `GET` | `/api/predict/{request_id}` | Retrieve specific prediction by ID |
-| `POST` | `/api/predict/record` | Ingest ML prediction results |
-| `GET` | `/api/locations` | List/search stored locations |
-| `POST` | `/api/locations` | Register a new location |
-| `GET` | `/api/forecast` | Query verified environmental observations |
-| `POST` | `/api/forecast` | Ingest verified environmental features |
-| `GET` | `/api/inundation` | Retrieve spatial GIS inundation (strictly by request_id or exact location+date) |
-| `POST` | `/api/inundation` | Store GIS simulation results |
+| `GET` | `/api/health` | System health check & database connectivity verification |
+| `GET` | `/api/locations` | Query stored locations from PostgreSQL |
+| `POST` | `/api/locations` | Register a new location record |
+| `GET` | `/api/forecast` | Query real environmental observations from PostgreSQL |
+| `POST` | `/api/forecast` | Store verified environmental features into PostgreSQL |
+| `POST` | `/api/predict` | Create and store a prediction request (`WAITING_FOR_AI_MODEL`) |
+| `GET` | `/api/predict/history` | List recent prediction requests from database |
+| `GET` | `/api/predict/{request_id}` | Retrieve specific prediction request by ID |
+| `GET` | `/api/inundation` | Retrieve stored inundation results (strict match only) |
+| `POST` | `/api/inundation` | Store inundation results linked to a prediction |
 
 ---
 
-## 6. Model Artifact Placement & AI Model Integration
+## 6. Database Testing Steps & Examples
 
-### Model File Placement
-The trained machine learning model artifact **MUST** be placed directly at:
+### Test 1: Health Check
+```bash
+curl -X GET http://localhost:8000/api/health
 ```
-backend/models/flood_prediction_model.pkl
+**Expected Response:**
+```json
+{
+  "status": "ok",
+  "service": "Flood Inundation Projection System API",
+  "database": "connected"
+}
 ```
 
-### Inference Lifecycle:
-1. `backend/app/services/model_service.py` is initialized once and loads `backend/models/flood_prediction_model.pkl`.
-2. When a prediction request arrives at `POST /api/predict`, `prediction_service.py`:
-   - Validates the target date strictly (HTTP 400 for invalid formats).
-   - Looks up or creates the location record in PostgreSQL.
-   - Searches `environmental_data` table for the matching `(location_id, date)`.
-   - Validates all 13 required features:
-     `latitude`, `longitude`, `rainfall_mm`, `temperature_c`, `humidity_pct`, `river_discharge_m3s`, `water_level_m`, `elevation_m`, `land_cover`, `soil_type`, `population_density`, `infrastructure`, `historical_floods`.
-   - If features are missing, returns `status: "INCOMPLETE_FEATURES"` or `status: "DATA_UNAVAILABLE"` without generating fake numbers.
-   - Calls `model_service.predict(feature_dict)`.
-   - Passes the result to `PredictionService.classify_risk()` to determine the risk level (`HIGH`, `MODERATE`, `LOW`).
-   - Persists the prediction in `predictions` and marks the request as `COMPLETED`.
+### Test 2: Create Location
+```bash
+curl -X POST http://localhost:8000/api/locations \
+  -H "Content-Type: application/json" \
+  -d '{
+    "name": "Bengaluru, Karnataka",
+    "latitude": 12.9716,
+    "longitude": 77.5946
+  }'
+```
+**Expected Response:**
+```json
+{
+  "id": 1,
+  "name": "Bengaluru, Karnataka",
+  "latitude": 12.9716,
+  "longitude": 77.5946,
+  "created_at": "2026-09-25T10:00:00Z"
+}
+```
 
+### Test 3: Retrieve Locations
+```bash
+curl -X GET http://localhost:8000/api/locations
+```
+
+### Test 4: Ingest Real Environmental Data
+```bash
+curl -X POST http://localhost:8000/api/forecast \
+  -H "Content-Type: application/json" \
+  -d '{
+    "location_id": 1,
+    "date": "2026-09-25",
+    "latitude": 12.9716,
+    "longitude": 77.5946,
+    "rainfall_mm": 120.0,
+    "temperature_c": 25.0,
+    "humidity_pct": 85.0,
+    "river_discharge_m3s": 500.0,
+    "water_level_m": 8.2,
+    "elevation_m": 900.0,
+    "land_cover": "urban",
+    "soil_type": "alluvial",
+    "population_density": 5000.0,
+    "infrastructure": 80,
+    "historical_floods": 2
+  }'
+```
+
+### Test 5: Query Environmental Data
+```bash
+curl -X GET "http://localhost:8000/api/forecast?location_id=1&date=2026-09-25"
+```
+
+### Test 6: Submit Prediction Request (Database Milestone)
+```bash
+curl -X POST http://localhost:8000/api/predict \
+  -H "Content-Type: application/json" \
+  -d '{
+    "latitude": 12.9716,
+    "longitude": 77.5946,
+    "date": "2026-09-25"
+  }'
+```
+**Expected Response:**
+```json
+{
+  "status": "WAITING_FOR_AI_MODEL",
+  "prediction_request_id": 1,
+  "location": {
+    "name": "Bengaluru, Karnataka",
+    "latitude": 12.9716,
+    "longitude": 77.5946
+  },
+  "date": "2026-09-25"
+}
+```
+
+### Test 7: Query Inundation (Strict Verification)
+```bash
+curl -X GET "http://localhost:8000/api/inundation?latitude=12.9716&longitude=77.5946&date=2026-09-25"
+```
+**Expected Response (when no simulation exists):**
+```json
+{
+  "available": false,
+  "geojson": null,
+  "maximum_depth": null,
+  "flooded_area_km2": null
+}
+```
+
+---
+
+## 7. AI Model Integration Status
+
+**Confirmation:**
+AI model integration has **NOT** been performed yet.
+- `flood_prediction_model.pkl` is NOT loaded.
+- `model.predict()` is NOT invoked.
+- Zero synthetic/fake flood probabilities are produced.
+- The system is verified for database persistence and CRUD APIs.
+- The AI model will be integrated in the next milestone.

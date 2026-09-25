@@ -28,7 +28,8 @@ def predict_flood(
     Logs the request into PostgreSQL `prediction_requests` table.
     In accordance with system specifications:
     - Does NOT fabricate pseudo-random probabilities or fake AI simulations.
-    - Accurately reports status as 'PENDING_AI_MODEL' until trained model inference is wired.
+    - Stores prediction request in PostgreSQL with status 'WAITING_FOR_AI_MODEL'.
+    - AI model integration is kept for subsequent milestone.
     """
     return prediction_service.process_prediction_request(
         db=db,

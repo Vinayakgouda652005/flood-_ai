@@ -1,8 +1,33 @@
+# Dependencies
 node_modules/
-build/
+frontend/node_modules/
+
+# Production builds
 dist/
+frontend/dist/
+build/
 coverage/
+
+# Python Virtual Environments & Bytecode
+venv/
+backend/venv/
+__pycache__/
+backend/app/**/__pycache__/
+*.py[cod]
+*$py.class
+*.db
+
+# Environment variables
+.env
+.env.local
+frontend/.env
+backend/.env
+!.env.example
+!frontend/.env.example
+!backend/.env.example
+
+# Operating System & IDEs
 .DS_Store
 *.log
-.env*
-!.env.example
+.vscode/
+.idea/

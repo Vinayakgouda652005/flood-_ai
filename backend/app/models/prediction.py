@@ -16,14 +16,19 @@ class Prediction(Base):
         unique=True,
         index=True,
     )
-    # Nullable because trained AI model will be integrated separately later
+    # Nullable until AI model inference milestone
     flood_probability = Column(Float, nullable=True)
-    risk_level = Column(String(50), nullable=True)
     flood_occurred = Column(Integer, nullable=True)
+    risk_level = Column(String(50), nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
 
-    # Relationship
+    # Relationships
     prediction_request = relationship("PredictionRequest", back_populates="prediction")
+    inundation_results = relationship(
+        "InundationResult",
+        back_populates="prediction",
+        cascade="all, delete-orphan",
+    )
 
     def __repr__(self) -> str:
         return f"<Prediction id={self.id} request_id={self.prediction_request_id} prob={self.flood_probability} risk={self.risk_level}>"
