@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, Float, String, Date, DateTime, ForeignKey
+from sqlalchemy import Column, Integer, Float, String, Date, DateTime, ForeignKey, UniqueConstraint
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
 
@@ -12,6 +12,9 @@ class EnvironmentalData(Base):
     used as inputs for the trained AI flood prediction model.
     """
     __tablename__ = "environmental_data"
+    __table_args__ = (
+        UniqueConstraint("location_id", "date", name="uq_environmental_location_date"),
+    )
 
     id = Column(Integer, primary_key=True, index=True, autoincrement=True)
     location_id = Column(Integer, ForeignKey("locations.id", ondelete="CASCADE"), nullable=False, index=True)

@@ -41,12 +41,12 @@ backend/
 │   │   ├── location.py             # locations table model
 │   │   ├── prediction_request.py   # prediction_requests table model
 │   │   ├── prediction.py           # predictions table model
-│   │   ├── environmental_data.py   # environmental_data table model
+│   │   ├── environmental_data.py   # environmental_data table model (with UniqueConstraint(location_id, date))
 │   │   └── inundation.py           # inundations table model
 │   ├── schemas/
 │   │   ├── __init__.py
 │   │   ├── location.py             # Location schemas
-│   │   ├── prediction.py           # Prediction request & response schemas
+│   │   ├── prediction.py           # Prediction request & response schemas (strict YYYY-MM-DD validator)
 │   │   ├── forecast.py             # Environmental feature schemas
 │   │   └── inundation.py           # Inundation geometry schemas
 │   ├── routes/
@@ -54,13 +54,17 @@ backend/
 │   │   ├── health.py               # Health check endpoint
 │   │   ├── locations.py            # Location query & registration endpoints
 │   │   ├── prediction.py           # Prediction endpoints (POST /api/predict)
-│   │   ├── forecast.py             # Environmental observation endpoints
-│   │   └── inundation.py           # Spatial inundation layer endpoints
+│   │   ├── forecast.py             # Environmental observation endpoints (strict date validation)
+│   │   └── inundation.py           # Spatial inundation layer endpoints (strict retrieval)
 │   └── services/
 │       ├── __init__.py
-│       ├── prediction_service.py   # Prediction request processing & AI model hook
-│       ├── forecast_service.py     # Environmental observation query service
-│       └── inundation_service.py   # Inundation spatial data service
+│       ├── model_service.py        # Dedicated AI model loading & inference service
+│       ├── prediction_service.py   # Validates features, coordinates location, calls model_service & stores prediction
+│       ├── forecast_service.py     # Real environmental observations query & storage
+│       └── inundation_service.py   # Strict spatial inundation retrieval by request_id or exact location+date
+├── models/
+│   ├── README.md                   # Model artifact directory instructions
+│   └── flood_prediction_model.pkl  # <-- Trained AI model artifact will be placed here
 ├── requirements.txt                # Python dependencies
 ├── .env.example                    # Template environment variables
 └── README.md                       # Documentation
@@ -101,6 +105,7 @@ Stores real meteorological, hydrological, and geophysical features.
 - `id` (INTEGER, Primary Key, Autoincrement)
 - `location_id` (INTEGER, Foreign Key -> `locations.id`, Not Null)
 - `date` (DATE, Not Null)
+- **Constraint**: `UniqueConstraint("location_id", "date", name="uq_environmental_location_date")`
 - `latitude` (FLOAT, Not Null)
 - `longitude` (FLOAT, Not Null)
 - `rainfall_mm` (FLOAT, Nullable)
@@ -169,7 +174,7 @@ Interactive OpenAPI docs are available at `http://localhost:8000/docs`.
 | Method | Endpoint | Description |
 |---|---|---|
 | `GET` | `/health` / `/api/health` | System health & PostgreSQL connection check |
-| `POST` | `/api/predict` | Primary prediction endpoint called by frontend |
+| `POST` | `/api/predict` | Primary prediction endpoint (strict YYYY-MM-DD validation) |
 | `GET` | `/api/predict/history` | List recent prediction requests |
 | `GET` | `/api/predict/{request_id}` | Retrieve specific prediction by ID |
 | `POST` | `/api/predict/record` | Ingest ML prediction results |
@@ -177,22 +182,29 @@ Interactive OpenAPI docs are available at `http://localhost:8000/docs`.
 | `POST` | `/api/locations` | Register a new location |
 | `GET` | `/api/forecast` | Query verified environmental observations |
 | `POST` | `/api/forecast` | Ingest verified environmental features |
-| `GET` | `/api/inundation` | Retrieve spatial GIS inundation polygons |
+| `GET` | `/api/inundation` | Retrieve spatial GIS inundation (strictly by request_id or exact location+date) |
 | `POST` | `/api/inundation` | Store GIS simulation results |
 
 ---
 
-## 6. Integrating the Future Trained AI Model
+## 6. Model Artifact Placement & AI Model Integration
 
-The application is structured so that the AI model will be integrated without changing the API contract or the React frontend.
+### Model File Placement
+The trained machine learning model artifact **MUST** be placed directly at:
+```
+backend/models/flood_prediction_model.pkl
+```
 
-In `backend/app/services/prediction_service.py`:
-1. Save the serialized model artifact (`model.joblib` or `model.onnx`) into a models directory.
-2. In `process_prediction_request`:
-   - Query features from the `environmental_data` table for `location.id` and `pred_date`.
-   - Run inference: `prob = model.predict_proba([features])[0][1]`.
-   - Derive civil defense risk level:
-     - `prob >= 0.75` -> `"HIGH"`
-     - `prob >= 0.40` -> `"MODERATE"`
-     - `prob < 0.40` -> `"LOW"`
-   - Save record to `predictions` table and mark `prediction_request.status = "COMPLETED"`.
+### Inference Lifecycle:
+1. `backend/app/services/model_service.py` is initialized once and loads `backend/models/flood_prediction_model.pkl`.
+2. When a prediction request arrives at `POST /api/predict`, `prediction_service.py`:
+   - Validates the target date strictly (HTTP 400 for invalid formats).
+   - Looks up or creates the location record in PostgreSQL.
+   - Searches `environmental_data` table for the matching `(location_id, date)`.
+   - Validates all 13 required features:
+     `latitude`, `longitude`, `rainfall_mm`, `temperature_c`, `humidity_pct`, `river_discharge_m3s`, `water_level_m`, `elevation_m`, `land_cover`, `soil_type`, `population_density`, `infrastructure`, `historical_floods`.
+   - If features are missing, returns `status: "INCOMPLETE_FEATURES"` or `status: "DATA_UNAVAILABLE"` without generating fake numbers.
+   - Calls `model_service.predict(feature_dict)`.
+   - Passes the result to `PredictionService.classify_risk()` to determine the risk level (`HIGH`, `MODERATE`, `LOW`).
+   - Persists the prediction in `predictions` and marks the request as `COMPLETED`.
+

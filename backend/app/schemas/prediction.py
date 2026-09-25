@@ -1,6 +1,6 @@
 from datetime import date, datetime
 from typing import Optional, Any, Dict
-from pydantic import BaseModel, Field, ConfigDict
+from pydantic import BaseModel, Field, ConfigDict, field_validator
 
 
 class PredictionInundationSummary(BaseModel):
@@ -19,6 +19,17 @@ class PredictionRequestCreate(BaseModel):
     longitude: float = Field(..., ge=-180.0, le=180.0, description="Longitude for flood projection")
     date: str = Field(..., description="Target prediction date in YYYY-MM-DD format")
     location_name: Optional[str] = Field(None, description="Optional human-readable location name")
+
+    @field_validator("date")
+    def validate_date_format(cls, v: str) -> str:
+        if not v or not isinstance(v, str):
+            raise ValueError("Prediction date must be a non-empty string in YYYY-MM-DD format.")
+        v_clean = v.strip()
+        try:
+            parsed = datetime.strptime(v_clean, "%Y-%m-%d")
+        except ValueError:
+            raise ValueError(f"Invalid date format: '{v}'. Prediction date must strictly follow YYYY-MM-DD format.")
+        return v_clean
 
 
 class PredictionRecordCreate(BaseModel):

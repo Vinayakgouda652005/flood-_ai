@@ -1,10 +1,12 @@
 import json
 import logging
+from datetime import datetime
 from typing import Optional, Any
 from sqlalchemy.orm import Session
 
 from app.models.inundation import Inundation
 from app.models.prediction_request import PredictionRequest
+from app.models.location import Location
 from app.schemas.inundation import InundationResponse, InundationCreate
 
 logger = logging.getLogger("flood_backend.inundation_service")
@@ -13,6 +15,10 @@ logger = logging.getLogger("flood_backend.inundation_service")
 class InundationService:
     """
     Manages spatial inundation geometries, depth maps, and flooded area projections.
+    STRICT RETRIEVAL POLICY:
+    - Never return the latest inundation record globally.
+    - Inundation results must strictly correspond to the requested prediction_request_id
+      or the exact location (within strict tolerance) + date.
     """
 
     @staticmethod
@@ -25,21 +31,33 @@ class InundationService:
     ) -> InundationResponse:
         inundation: Optional[Inundation] = None
 
-        if request_id:
+        if request_id is not None:
+            # Strictly match by prediction_request_id
             inundation = (
                 db.query(Inundation)
                 .filter(Inundation.prediction_request_id == request_id)
                 .first()
             )
+        elif date:
+            # Strictly match by exact location coordinates and date
+            try:
+                parsed_date = datetime.strptime(date, "%Y-%m-%d").date()
+                coord_tolerance = 0.01  # strict ~1km tolerance
+                inundation = (
+                    db.query(Inundation)
+                    .join(PredictionRequest, Inundation.prediction_request_id == PredictionRequest.id)
+                    .join(Location, PredictionRequest.location_id == Location.id)
+                    .filter(
+                        PredictionRequest.prediction_date == parsed_date,
+                        Location.latitude.between(latitude - coord_tolerance, latitude + coord_tolerance),
+                        Location.longitude.between(longitude - coord_tolerance, longitude + coord_tolerance),
+                    )
+                    .first()
+                )
+            except ValueError:
+                inundation = None
 
-        if not inundation:
-            # Query most recent inundation associated with a nearby prediction request
-            query = (
-                db.query(Inundation)
-                .join(PredictionRequest, Inundation.prediction_request_id == PredictionRequest.id)
-            )
-            inundation = query.order_by(Inundation.created_at.desc()).first()
-
+        # Do NOT fall back to any global record; strict return if not found
         if not inundation or not inundation.geojson_data:
             return InundationResponse(
                 available=False,
@@ -49,7 +67,7 @@ class InundationService:
                 max_depth_m=None,
                 avg_depth_m=None,
                 geojson=None,
-                message="No spatial inundation projection computed yet in database.",
+                message="No spatial inundation projection found for the specified request ID or location and date.",
             )
 
         # Parse stored GeoJSON

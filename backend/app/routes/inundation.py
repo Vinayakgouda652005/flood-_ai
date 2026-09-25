@@ -1,5 +1,6 @@
+from datetime import datetime
 from typing import Optional
-from fastapi import APIRouter, Depends, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.orm import Session
 
 from app.core.database import get_db
@@ -21,6 +22,15 @@ def get_inundation_layer(
     Retrieves spatial inundation polygons and depth maps for a prediction request.
     Returns available=False if no hydrodynamic simulation has been run and stored.
     """
+    if date:
+        try:
+            datetime.strptime(date.strip(), "%Y-%m-%d")
+        except ValueError:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Invalid date format: '{date}'. Date must follow YYYY-MM-DD.",
+            )
+
     return inundation_service.get_inundation(
         db=db,
         latitude=latitude,

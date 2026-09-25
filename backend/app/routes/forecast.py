@@ -1,5 +1,6 @@
+from datetime import datetime
 from typing import Optional
-from fastapi import APIRouter, Depends, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.orm import Session
 
 from app.core.database import get_db
@@ -24,6 +25,15 @@ def get_environmental_forecast(
     Retrieves environmental observation and forecast records for coordinates.
     Strictly queries real database records; does not generate fake readings.
     """
+    if date:
+        try:
+            datetime.strptime(date.strip(), "%Y-%m-%d")
+        except ValueError:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Invalid date format: '{date}'. Date must follow YYYY-MM-DD.",
+            )
+
     return forecast_service.get_environmental_forecast(
         db=db,
         latitude=latitude,
