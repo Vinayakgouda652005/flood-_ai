@@ -15,11 +15,10 @@ class Settings(BaseSettings):
     PORT: int = 8000
 
     # PostgreSQL Database URL
-    # Format: postgresql+psycopg2://user:password@localhost:5432/flood_db
-    # If PostgreSQL is not active, fallback or SQLite can be provided in DATABASE_URL
+    # Format: postgresql://postgres:YOUR_PASSWORD@localhost:5432/flood_inundation_db
     DATABASE_URL: str = os.getenv(
         "DATABASE_URL",
-        "postgresql+psycopg2://postgres:postgres@localhost:5432/flood_db"
+        "postgresql://postgres:postgres@localhost:5432/flood_inundation_db"
     )
 
     # CORS origins for Vite frontend communication

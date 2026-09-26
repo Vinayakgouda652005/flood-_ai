@@ -69,7 +69,7 @@ export const floodService = {
    *   }
    * }
    */
-  async predictFlood({ latitude, longitude, date, name }) {
+  async predictFlood({ latitude, longitude, date }) {
     if (latitude === undefined || latitude === null || isNaN(Number(latitude))) {
       throw new Error('Valid latitude is required for prediction.');
     }
@@ -85,9 +85,6 @@ export const floodService = {
       longitude: Number(Number(longitude).toFixed(6)),
       date: String(date),
     };
-    if (name) {
-      payload.location_name = String(name);
-    }
 
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), 12000);
@@ -142,23 +139,16 @@ export const floodService = {
           ? (floodProb >= 0.5 ? 1 : 0)
           : null;
 
-      const resolvedLocationName =
-        (data.location && data.location.name) ||
-        data.location_name ||
-        name ||
-        '';
-
       return {
-        latitude: (data.location && data.location.latitude) || payload.latitude,
-        longitude: (data.location && data.location.longitude) || payload.longitude,
-        locationName: resolvedLocationName,
-        date: data.date || payload.date,
+        latitude: payload.latitude,
+        longitude: payload.longitude,
+        date: payload.date,
         flood_probability: floodProb,
         risk_level: riskLevel,
         flood_occurred: floodOccurred,
-        status: data.status || 'WAITING_FOR_AI_MODEL',
+        status: data.status || 'COMPLETED',
         message: data.message || '',
-        request_id: data.prediction_request_id || data.request_id || null,
+        request_id: data.request_id || null,
         inundation: data.inundation || {
           available: false,
           geojson: null,
@@ -173,71 +163,6 @@ export const floodService = {
       // If error is network refusal or CORS or server offline
       throw new Error('Prediction service is currently unavailable.');
     }
-  },
-
-  /**
-   * Fetch registered locations from PostgreSQL
-   * GET /api/locations?query=...
-   */
-  async getLocations(query = '') {
-    try {
-      const url = query
-        ? `${API_BASE_URL}/api/locations?query=${encodeURIComponent(query)}`
-        : `${API_BASE_URL}/api/locations`;
-      const response = await fetch(url, { headers: { Accept: 'application/json' } });
-      if (response.ok) {
-        return await response.json();
-      }
-    } catch {
-      // Backend not running
-    }
-    return null;
-  },
-
-  /**
-   * Register a new location in PostgreSQL
-   * POST /api/locations
-   */
-  async createLocation({ name, latitude, longitude }) {
-    try {
-      const response = await fetch(`${API_BASE_URL}/api/locations`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Accept: 'application/json',
-        },
-        body: JSON.stringify({ name, latitude, longitude }),
-      });
-      if (response.ok) {
-        return await response.json();
-      }
-    } catch {
-      // Backend not running
-    }
-    return null;
-  },
-
-  /**
-   * Ingest environmental data into PostgreSQL
-   * POST /api/forecast
-   */
-  async saveForecast(data) {
-    try {
-      const response = await fetch(`${API_BASE_URL}/api/forecast`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Accept: 'application/json',
-        },
-        body: JSON.stringify(data),
-      });
-      if (response.ok) {
-        return await response.json();
-      }
-    } catch {
-      // Backend not running
-    }
-    return null;
   },
 
   /**

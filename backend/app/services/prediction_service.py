@@ -62,8 +62,28 @@ class PredictionService:
             return "MODERATE"
         return "LOW"
 
-    @staticmethod
+    PRESET_COORDINATES = [
+        (12.9716, 77.5946, "Bengaluru, Karnataka"),
+        (16.5062, 80.6480, "Vijayawada, Krishna Basin, Andhra Pradesh"),
+        (25.5941, 85.1376, "Patna, Ganga Basin, Bihar"),
+        (26.1445, 91.7362, "Guwahati, Brahmaputra Basin, Assam"),
+        (20.4625, 85.8830, "Cuttack, Mahanadi Delta, Odisha"),
+        (25.3176, 82.9739, "Varanasi, Middle Ganga, Uttar Pradesh"),
+        (19.0760, 72.8777, "Mumbai, Mithi Basin, Maharashtra"),
+        (13.0827, 80.2707, "Chennai, Adyar & Cooum Basins, Tamil Nadu"),
+        (22.5726, 88.3639, "Kolkata, Hooghly Basin, West Bengal"),
+        (28.6139, 77.2090, "Delhi, Yamuna Floodplain, NCR"),
+        (34.0837, 74.7973, "Srinagar, Jhelum Basin, Jammu & Kashmir"),
+        (21.1702, 72.8311, "Surat, Tapi Basin, Gujarat"),
+        (9.9312, 76.2673, "Kochi, Periyar Basin, Kerala"),
+        (17.3850, 78.4867, "Hyderabad, Musi Basin, Telangana"),
+        (18.5204, 73.8567, "Pune, Mula-Mutha Basin, Maharashtra"),
+        (23.0225, 72.5714, "Ahmedabad, Sabarmati Basin, Gujarat"),
+    ]
+
+    @classmethod
     def get_or_create_location(
+        cls,
         db: Session,
         latitude: float,
         longitude: float,
@@ -85,7 +105,15 @@ class PredictionService:
         )
 
         if not location:
-            loc_name = name or f"Coordinates ({latitude:.4f}, {longitude:.4f})"
+            loc_name = name
+            if not loc_name:
+                for p_lat, p_lon, p_name in cls.PRESET_COORDINATES:
+                    if abs(latitude - p_lat) < 0.05 and abs(longitude - p_lon) < 0.05:
+                        loc_name = p_name
+                        break
+            if not loc_name:
+                loc_name = f"Coordinates ({latitude:.4f}, {longitude:.4f})"
+
             location = Location(
                 name=loc_name,
                 latitude=round(latitude, 6),

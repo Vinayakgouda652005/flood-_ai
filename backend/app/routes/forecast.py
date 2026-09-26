@@ -14,34 +14,42 @@ from app.services.forecast_service import forecast_service
 router = APIRouter(prefix="/api/forecast", tags=["Forecast"])
 
 
-@router.get("", response_model=ForecastResponse)
-def get_environmental_forecast(
+@router.get("", response_model=List[EnvironmentalDataResponse])
+def get_environmental_records(
     location_id: Optional[int] = Query(None, description="Location ID to query"),
     latitude: Optional[float] = Query(None, ge=-90.0, le=90.0),
     longitude: Optional[float] = Query(None, ge=-180.0, le=180.0),
     date: Optional[str] = Query(None, description="Date in YYYY-MM-DD format"),
+    limit: int = Query(50, ge=1, le=200),
     db: Session = Depends(get_db),
 ):
     """
     Retrieves environmental observation and forecast records from PostgreSQL.
     Strictly queries real database records; does NOT generate fake or random readings.
     """
+    query = db.query(EnvironmentalData)
+
+    if location_id is not None:
+        query = query.filter(EnvironmentalData.location_id == location_id)
+    elif latitude is not None and longitude is not None:
+        tolerance = 0.02
+        query = query.filter(
+            EnvironmentalData.latitude.between(latitude - tolerance, latitude + tolerance),
+            EnvironmentalData.longitude.between(longitude - tolerance, longitude + tolerance),
+        )
+
     if date:
         try:
-            datetime.strptime(date.strip(), "%Y-%m-%d")
+            parsed_date = datetime.strptime(date.strip(), "%Y-%m-%d").date()
+            query = query.filter(EnvironmentalData.date == parsed_date)
         except ValueError:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail=f"Invalid date format: '{date}'. Date must follow YYYY-MM-DD.",
             )
 
-    return forecast_service.get_environmental_forecast(
-        db=db,
-        location_id=location_id,
-        latitude=latitude,
-        longitude=longitude,
-        target_date=date,
-    )
+    records = query.order_by(EnvironmentalData.date.desc(), EnvironmentalData.created_at.desc()).limit(limit).all()
+    return records
 
 
 @router.post("", response_model=EnvironmentalDataResponse, status_code=status.HTTP_201_CREATED)

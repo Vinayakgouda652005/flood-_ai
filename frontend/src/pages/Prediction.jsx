@@ -249,13 +249,12 @@ export const Prediction = ({
         latitude: selectedLocation.latitude,
         longitude: selectedLocation.longitude,
         date: selectedDate,
-        name: selectedLocation.name,
       });
 
       // Augment result with human-readable location name
       const finalResult = {
         ...response,
-        locationName: response.locationName || selectedLocation.name,
+        locationName: selectedLocation.name,
       };
 
       if (setPredictionResult) {
@@ -730,28 +729,23 @@ export const Prediction = ({
               <div>
                 <div className="font-bold text-sm">
                   Prediction Status:{' '}
-                  {predictionResult.status === 'WAITING_FOR_AI_MODEL'
-                    ? 'Request Logged in Database (WAITING_FOR_AI_MODEL)'
-                    : predictionResult.status === 'PENDING_AI_MODEL'
-                    ? 'Request Logged (AI Model Integration Pending)'
+                  {predictionResult.status === 'WAITING_FOR_AI_MODEL' || predictionResult.status === 'PENDING_AI_MODEL'
+                    ? 'Request Logged (Waiting for AI Model)'
                     : predictionResult.flood_occurred
                     ? 'Flood Threat Projected (Risk Detected)'
                     : 'Minimal Threat (No Flood Projected)'}
                 </div>
                 <div className="text-[11px] opacity-90 mt-0.5">
-                  {predictionResult.message ||
-                    (predictionResult.status === 'WAITING_FOR_AI_MODEL'
-                      ? 'Prediction request recorded in PostgreSQL. Waiting for AI model integration.'
-                      : 'Hydro-model simulation processed.')}
+                  {predictionResult.status === 'WAITING_FOR_AI_MODEL' || predictionResult.status === 'PENDING_AI_MODEL'
+                    ? (predictionResult.message || 'Prediction request recorded in PostgreSQL. Status: WAITING_FOR_AI_MODEL.')
+                    : predictionResult.flood_occurred
+                    ? 'Hydro-model simulation indicates river inundation thresholds exceeded for the target date.'
+                    : 'River water level and precipitation forecast are within normal seasonal capacity.'}
                 </div>
               </div>
             </div>
             <div className="font-mono text-xs font-bold uppercase px-2.5 py-1 rounded bg-white/70 border border-current self-start sm:self-auto shrink-0">
-              {predictionResult.status === 'WAITING_FOR_AI_MODEL'
-                ? `DB Request #${predictionResult.request_id || 1}`
-                : predictionResult.status === 'PENDING_AI_MODEL'
-                ? 'Status: Queued'
-                : `Risk: ${predictionResult.risk_level}`}
+              {predictionResult.status === 'WAITING_FOR_AI_MODEL' || predictionResult.status === 'PENDING_AI_MODEL' ? 'Status: WAITING_FOR_AI_MODEL' : `Risk: ${predictionResult.risk_level}`}
             </div>
           </div>
         </div>

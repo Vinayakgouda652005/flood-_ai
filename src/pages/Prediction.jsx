@@ -711,7 +711,7 @@ export const Prediction = ({
           {/* 5. Prediction Status Banner */}
           <div
             className={`p-3.5 rounded-lg border text-xs flex flex-col sm:flex-row sm:items-center justify-between gap-2 ${
-              predictionResult.status === 'PENDING_AI_MODEL'
+              predictionResult.status === 'WAITING_FOR_AI_MODEL' || predictionResult.status === 'PENDING_AI_MODEL'
                 ? 'bg-sky-50 border-sky-200 text-sky-950'
                 : predictionResult.flood_occurred
                 ? 'bg-red-50 border-red-200 text-red-900'
@@ -719,7 +719,7 @@ export const Prediction = ({
             }`}
           >
             <div className="flex items-center gap-2.5">
-              {predictionResult.status === 'PENDING_AI_MODEL' ? (
+              {predictionResult.status === 'WAITING_FOR_AI_MODEL' || predictionResult.status === 'PENDING_AI_MODEL' ? (
                 <HelpCircle className="w-5 h-5 text-sky-600 shrink-0" />
               ) : predictionResult.flood_occurred ? (
                 <ShieldAlert className="w-5 h-5 text-red-600 shrink-0" />
@@ -729,15 +729,15 @@ export const Prediction = ({
               <div>
                 <div className="font-bold text-sm">
                   Prediction Status:{' '}
-                  {predictionResult.status === 'PENDING_AI_MODEL'
-                    ? 'Request Logged (AI Model Integration Pending)'
+                  {predictionResult.status === 'WAITING_FOR_AI_MODEL' || predictionResult.status === 'PENDING_AI_MODEL'
+                    ? 'Request Logged (Waiting for AI Model)'
                     : predictionResult.flood_occurred
                     ? 'Flood Threat Projected (Risk Detected)'
                     : 'Minimal Threat (No Flood Projected)'}
                 </div>
                 <div className="text-[11px] opacity-90 mt-0.5">
-                  {predictionResult.status === 'PENDING_AI_MODEL'
-                    ? (predictionResult.message || 'Prediction request recorded in PostgreSQL. Trained AI model inference pending.')
+                  {predictionResult.status === 'WAITING_FOR_AI_MODEL' || predictionResult.status === 'PENDING_AI_MODEL'
+                    ? (predictionResult.message || 'Prediction request recorded in PostgreSQL. Status: WAITING_FOR_AI_MODEL.')
                     : predictionResult.flood_occurred
                     ? 'Hydro-model simulation indicates river inundation thresholds exceeded for the target date.'
                     : 'River water level and precipitation forecast are within normal seasonal capacity.'}
@@ -745,7 +745,7 @@ export const Prediction = ({
               </div>
             </div>
             <div className="font-mono text-xs font-bold uppercase px-2.5 py-1 rounded bg-white/70 border border-current self-start sm:self-auto shrink-0">
-              {predictionResult.status === 'PENDING_AI_MODEL' ? 'Status: Queued' : `Risk: ${predictionResult.risk_level}`}
+              {predictionResult.status === 'WAITING_FOR_AI_MODEL' || predictionResult.status === 'PENDING_AI_MODEL' ? 'Status: WAITING_FOR_AI_MODEL' : `Risk: ${predictionResult.risk_level}`}
             </div>
           </div>
         </div>
