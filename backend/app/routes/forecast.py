@@ -1,9 +1,10 @@
 from datetime import datetime
-from typing import Optional
+from typing import Optional, List
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.orm import Session
 
 from app.core.database import get_db
+from app.models.environmental_data import EnvironmentalData
 from app.schemas.forecast import (
     ForecastResponse,
     EnvironmentalDataCreate,

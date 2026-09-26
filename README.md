@@ -51,48 +51,99 @@ flood-inundation-projection-system/
 
 ---
 
-## Running the Application
+## Local Setup & Quickstart Guide
 
-The frontend and backend run as independent services.
+Follow these steps to run the application locally on your machine in VS Code.
 
-### 1. Backend (FastAPI + PostgreSQL)
+### Step 1: PostgreSQL Database Creation
+Ensure PostgreSQL is installed and running on your system (default port 5432). Create the database in `psql` or pgAdmin:
+
+```sql
+CREATE DATABASE flood_inundation_db;
+```
+
+### Step 2: Backend .env Configuration
+Navigate to the `backend` folder and verify or edit `backend/.env`:
+
+```env
+# backend/.env
+PORT=8000
+HOST=0.0.0.0
+ENVIRONMENT=development
+CORS_ORIGINS=["http://localhost:3000", "http://localhost:5173", "http://127.0.0.1:3000", "http://127.0.0.1:5173"]
+
+# Replace YOUR_PASSWORD with your actual local PostgreSQL password
+DATABASE_URL=postgresql://postgres:YOUR_PASSWORD@localhost:5432/flood_inundation_db
+```
+
+### Step 3: Backend Installation
+Create a Python virtual environment and install the required dependencies:
 
 ```bash
 cd backend
 ```
 
-#### Windows:
+**Windows (PowerShell / Command Prompt):**
 ```cmd
 python -m venv venv
 venv\Scripts\activate
 pip install -r requirements.txt
-uvicorn app.main:app --reload --port 8000
 ```
 
-#### Linux / macOS:
+**Linux / macOS:**
 ```bash
 python3 -m venv venv
 source venv/bin/activate
 pip install -r requirements.txt
+```
+
+### Step 4: Backend Startup
+Launch the FastAPI server with live reload:
+
+```bash
 uvicorn app.main:app --reload --port 8000
 ```
 
-- **Backend API URL:** `http://localhost:8000`
-- **Interactive OpenAPI Documentation:** `http://localhost:8000/docs`
-- **Database Configuration:** Configure `DATABASE_URL` in `backend/.env` (e.g. `postgresql://postgres:password@localhost:5432/flood_inundation_db`).
+The backend starts at `http://localhost:8000`. Database tables (`locations`, `prediction_requests`, `predictions`, `environmental_data`, `inundation_results`) are automatically created in PostgreSQL on startup.
 
----
-
-### 2. Frontend (React + Vite)
+### Step 5: Frontend Installation
+In a separate terminal, navigate to the `frontend` directory and install npm packages:
 
 ```bash
 cd frontend
 npm install
+```
+
+Verify that `frontend/.env` contains:
+```env
+VITE_API_BASE_URL=http://localhost:8000
+```
+
+### Step 6: Frontend Startup
+Start the Vite development server:
+
+```bash
 npm run dev
 ```
 
-- **Frontend Application URL:** `http://localhost:5173`
-- **Backend API Base URL:** Configured in `frontend/.env` via `VITE_API_BASE_URL=http://localhost:8000`.
+The frontend will run at `http://localhost:5173` (or port 3000 if configured).
+
+### Step 7: API Health Check
+Verify that the FastAPI backend and PostgreSQL connection are running and healthy by visiting `http://localhost:8000/api/health` in your browser or executing:
+
+```bash
+curl http://localhost:8000/api/health
+```
+
+**Expected response:**
+```json
+{
+  "status": "ok",
+  "service": "Flood Inundation Projection System API",
+  "database": "connected"
+}
+```
+
 
 ---
 

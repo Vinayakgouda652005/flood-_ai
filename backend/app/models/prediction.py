@@ -32,3 +32,7 @@ class Prediction(Base):
 
     def __repr__(self) -> str:
         return f"<Prediction id={self.id} request_id={self.prediction_request_id} prob={self.flood_probability} risk={self.risk_level}>"
+
+
+# Re-export PredictionRequest for flexible imports
+from app.models.prediction_request import PredictionRequest  # noqa: E402, F401
